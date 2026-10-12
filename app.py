@@ -1,9 +1,23 @@
-import re
-from datetime import date, timedelta
-from urllib.parse import urlparse
-import requests
+"""Repo Guide - An interactive Streamlit app generating beginner-friendly onboarding guides for GitHub repositories."""
+
+from __future__ import annotations
+
+import datetime
+import html
 import streamlit as st
-import ollama
+
+from models import RepoGuideError, RepoData
+from github_client import (
+    parse_github_url,
+    get_github_token,
+    fetch_github_repo_data,
+    fetch_trending_repos,
+)
+from ollama_client import (
+    get_installed_ollama_models,
+    run_ollama_chat,
+)
+from prompt_builder import build_safe_prompt
 
 DEFAULT_REPO_URL = "https://github.com/mattpocock/skills"
 
@@ -16,7 +30,7 @@ st.set_page_config(
 )
 
 
-def apply_theme():
+def apply_theme() -> None:
     """
     Applies a clean 'light grid' developer-event landing page theme:
     - #fafafa page background
@@ -364,47 +378,42 @@ def apply_theme():
 apply_theme()
 
 
-class RepoGuideError(Exception):
-    """Custom exception for user-friendly error handling."""
-    pass
+# -----------------------------------------------------------------------------
+# CACHED SERVICE CALLS (TTL: 30 min for GitHub, 1 hr for Ollama & Trending)
+# -----------------------------------------------------------------------------
+@st.cache_data(ttl=1800, show_spinner=False)
+def fetch_github_repo_data_cached(owner: str, repo: str, is_authenticated: bool, refresh_nonce: int = 0) -> RepoData:
+    """Fetches GitHub repository structure and content with a 30-minute cache TTL."""
+    return fetch_github_repo_data(owner, repo)
 
 
-def get_installed_ollama_models():
+@st.cache_data(ttl=3600, show_spinner=False)
+def generate_guide_cached(owner: str, repo: str, model_name: str, cache_digest: str, refresh_nonce: int = 0) -> dict:
     """
-    Retrieves installed Ollama models, handling both response formats:
-    - Object with .models attribute (each with .model or .name)
-    - Dict with 'models' key (each with 'model' or 'name')
+    Coordinates GitHub data fetching, safe prompt construction, and Ollama generation.
+    Cached for 1 hour.
     """
-    try:
-        data = ollama.list()
-    except Exception:
-        return []
+    token_present = get_github_token() is not None
+    data = fetch_github_repo_data_cached(owner, repo, token_present, refresh_nonce)
 
-    raw_models = getattr(data, "models", None)
-    if raw_models is None and isinstance(data, dict):
-        raw_models = data.get("models", [])
+    system_prompt, user_prompt = build_safe_prompt(owner, repo, data)
+    guide_content = run_ollama_chat(model_name, system_prompt, user_prompt)
 
-    if not raw_models:
-        return []
+    return {
+        "data": data,
+        "guide_content": guide_content,
+    }
 
-    model_names = []
-    for m in raw_models:
-        name = None
-        if hasattr(m, "model") and m.model:
-            name = m.model
-        elif hasattr(m, "name") and m.name:
-            name = m.name
-        elif isinstance(m, dict):
-            name = m.get("model") or m.get("name")
 
-        if name and name not in model_names:
-            model_names.append(name)
-
-    return model_names
+@st.cache_data(ttl=3600)
+def fetch_trending_repos_cached(target_date: str, is_authenticated: bool, refresh_nonce: int = 0) -> list[dict]:
+    """Fetches trending repositories with a 1-hour cache TTL."""
+    trending_models = fetch_trending_repos(target_date)
+    return [item.to_dict() for item in trending_models]
 
 
 # -----------------------------------------------------------------------------
-# SIDEBAR: FEATURE 1 - Model Picker for Different Laptops
+# SIDEBAR: MODEL PICKER FOR LAPTOPS & REPO SETTINGS
 # -----------------------------------------------------------------------------
 st.sidebar.header("Choose your model")
 
@@ -425,7 +434,6 @@ else:
 installed_models = get_installed_ollama_models()
 
 if installed_models:
-    # Default to phi4-mini or phi4-mini:latest if installed
     default_idx = 0
     for idx, m in enumerate(installed_models):
         if m == "phi4-mini" or m.startswith("phi4-mini:"):
@@ -439,7 +447,7 @@ if installed_models:
         help="Choose from models installed locally in Ollama",
     )
 else:
-    st.sidebar.warning("⚠️ No models installed in Ollama. Run: `ollama pull phi4-mini` in terminal.")
+    st.sidebar.warning("⚠️ No models found in Ollama.\nTo install the recommended model, run:\n`ollama pull phi4-mini`")
     selected_from_dropdown = "phi4-mini"
 
 custom_model_input = st.sidebar.text_input(
@@ -448,277 +456,40 @@ custom_model_input = st.sidebar.text_input(
     help="Type any custom model name you have installed in Ollama",
 )
 
-# Final selected model priority: custom input overrides selectbox
 selected_model = custom_model_input.strip() if custom_model_input.strip() else selected_from_dropdown
 
-# Check if model is missing from installed list
 if installed_models and selected_model not in installed_models and not any(m.startswith(f"{selected_model}:") for m in installed_models):
     st.sidebar.warning(f"⚠️ Model `{selected_model}` is not in your installed list.\nTo install, run:\n`ollama pull {selected_model}`")
 
 st.sidebar.caption("💡 Larger models give better answers but run slower on CPU.")
 
+st.sidebar.markdown("---")
+# GitHub Token Status in Sidebar
+token_present = get_github_token() is not None
+if token_present:
+    st.sidebar.caption("🔑 **GitHub API**: Authenticated (5,000 req/hr)")
+else:
+    st.sidebar.caption("🌐 **GitHub API**: Public mode (60 req/hr)")
+
+if st.sidebar.button("🧹 Clear App Cache", use_container_width=True, help="Clears cached repository data and generated guides"):
+    st.cache_data.clear()
+    st.sidebar.success("Cache cleared!")
+
 
 # -----------------------------------------------------------------------------
-# MAIN APP HEADER
+# MAIN APP HEADER (XSS-safe escaped rendering)
 # -----------------------------------------------------------------------------
+safe_model_display = html.escape(selected_model)
 st.markdown(
     f"""
     <div class="main-header">
         <div class="main-title">Repo Guide</div>
         <div class="main-subtitle">A friendly open-source onboarding guide generator for GitHub repositories</div>
-        <div class="powered-badge">Powered by {selected_model} (open-weight, running locally via Ollama)</div>
+        <div class="powered-badge">Powered by {safe_model_display} (open-weight, running locally via Ollama)</div>
     </div>
     """,
     unsafe_allow_html=True,
 )
-
-
-def parse_github_url(url: str):
-    """
-    Parses and validates a GitHub repository URL, returning (owner, repo).
-    Returns (None, None) if invalid.
-    """
-    url = url.strip()
-    if not url:
-        return None, None
-
-    if not re.match(r"^https?://", url):
-        url = "https://" + url
-
-    try:
-        parsed = urlparse(url)
-    except Exception:
-        return None, None
-
-    if parsed.netloc.lower() not in ("github.com", "www.github.com"):
-        return None, None
-
-    path_parts = [p for p in parsed.path.strip("/").split("/") if p]
-    if len(path_parts) < 2:
-        return None, None
-
-    owner = path_parts[0]
-    repo = path_parts[1]
-
-    if repo.endswith(".git"):
-        repo = repo[:-4]
-
-    if not re.match(r"^[a-zA-Z0-9_\-\.]+$", owner) or not re.match(r"^[a-zA-Z0-9_\-\.]+$", repo):
-        return None, None
-
-    return owner, repo
-
-
-def fetch_github_repo_data(owner: str, repo: str):
-    """
-    Fetches top-level contents, subfolders inside main skills folder(s), and the README.
-    """
-    headers = {
-        "User-Agent": "RepoGuide-StreamlitApp",
-        "Accept": "application/vnd.github.v3+json",
-    }
-
-    contents_url = f"https://api.github.com/repos/{owner}/{repo}/contents"
-    readme_url = f"https://api.github.com/repos/{owner}/{repo}/readme"
-
-    # 1. Fetch top-level file and folder list
-    try:
-        c_res = requests.get(contents_url, headers=headers, timeout=12)
-    except requests.exceptions.Timeout:
-        raise RepoGuideError("⏱️ GitHub request timed out. Please check your internet connection and try again.")
-    except requests.exceptions.RequestException as e:
-        raise RepoGuideError(f"🌐 Network error connecting to GitHub: {e}")
-
-    if c_res.status_code == 404:
-        raise RepoGuideError(f"🔍 Repository '{owner}/{repo}' not found. Please ensure the repository is public and the URL is spelled correctly.")
-    elif c_res.status_code in (403, 429):
-        raise RepoGuideError("⏱️ GitHub API rate limit reached (unauthenticated requests are limited to 60/hour). Please try again later.")
-    elif c_res.status_code != 200:
-        raise RepoGuideError(f"⚠️ GitHub API returned unexpected status code {c_res.status_code}: {c_res.text}")
-
-    contents_json = c_res.json()
-    if not isinstance(contents_json, list):
-        raise RepoGuideError("⚠️ Unexpected repository structure received from GitHub.")
-
-    files_list = []
-    skills_target_dirs = []
-    for item in contents_json:
-        name = item.get("name", "")
-        item_type = item.get("type", "file")
-        if item_type == "dir":
-            files_list.append(f"{name}/")
-            if "skill" in name.lower():
-                skills_target_dirs.append(name)
-        else:
-            files_list.append(name)
-
-    # 2. Check for skills subfolders inside main skills folder(s)
-    skill_subfolders = []
-    for s_dir in skills_target_dirs:
-        try:
-            s_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{s_dir}"
-            s_res = requests.get(s_url, headers=headers, timeout=10)
-            if s_res.status_code == 200 and isinstance(s_res.json(), list):
-                for sub_item in s_res.json():
-                    if sub_item.get("type") == "dir":
-                        sub_path = f"{s_dir}/{sub_item['name']}"
-                        skill_subfolders.append(sub_path)
-                        # Check one level deeper for categorized skills (e.g., skills/engineering/code-review)
-                        try:
-                            nested_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{sub_path}"
-                            nested_res = requests.get(nested_url, headers=headers, timeout=10)
-                            if nested_res.status_code == 200 and isinstance(nested_res.json(), list):
-                                for nested in nested_res.json():
-                                    if nested.get("type") == "dir":
-                                        skill_subfolders.append(f"{sub_path}/{nested['name']}")
-                        except Exception:
-                            pass
-        except Exception:
-            pass
-
-    # 3. Fetch README
-    readme_headers = {
-        "User-Agent": "RepoGuide-StreamlitApp",
-        "Accept": "application/vnd.github.raw",
-    }
-    readme_text = ""
-    try:
-        r_res = requests.get(readme_url, headers=readme_headers, timeout=12)
-        if r_res.status_code == 200:
-            readme_text = r_res.text
-        elif r_res.status_code == 404:
-            readme_text = "(No README file found in this repository)"
-        elif r_res.status_code in (403, 429):
-            raise RepoGuideError("⏱️ GitHub API rate limit reached while fetching README. Please try again later.")
-        else:
-            readme_text = "(Could not fetch README content)"
-    except requests.exceptions.RequestException:
-        readme_text = "(Could not fetch README content due to a network error)"
-
-    # Truncate the README to the first 3000 characters
-    truncated_readme = readme_text[:3000]
-
-    return files_list, skill_subfolders, truncated_readme
-
-
-@st.cache_data(show_spinner=False)
-def analyze_repo_cached(owner: str, repo: str, model_name: str):
-    """
-    Cached analysis of a repository using GitHub API and local Ollama model.
-    Includes model_name in arguments so each model gets its own cached result.
-    """
-    # 1. Fetch repo data
-    files_list, skill_subfolders, truncated_readme = fetch_github_repo_data(owner, repo)
-
-    # 2. Prepare prompt
-    files_formatted = "\n".join([f"- {f}" for f in files_list]) if files_list else "(None)"
-
-    skills_section = ""
-    if skill_subfolders:
-        skills_section = (
-            "\nSubfolders inside the main skills folder(s):\n"
-            + "\n".join([f"- {sf}" for sf in skill_subfolders])
-            + "\n"
-        )
-
-    prompt = f"""You are Repo Guide, an open-source mentor helping new contributors understand this codebase. Always respond in English.
-
-Analyze the GitHub repository '{owner}/{repo}'.
-
-Top-Level Files and Directories:
-{files_formatted}
-{skills_section}
-README Content (truncated to first 3000 characters):
-\"\"\"
-{truncated_readme}
-\"\"\"
-
-Important guidance: This repo may contain Markdown instruction files (skills) for AI coding agents rather than runnable app code. If so, explain what the skills do and how to install or use them, instead of how to run an app.
-
-Please produce a beginner guide with exactly the following four sections:
-1) What the project does: Explain the core purpose, key features, and target audience in simple, beginner-friendly terms.
-2) How to run it: Provide practical setup and execution instructions based on the README. If this repo contains Markdown instruction files (skills) for AI coding agents rather than runnable app code, explain what the skills do and how to install or use them, instead of how to run an app.
-3) A map of the important folders/files: Explain the role of key directories and files found in this repository, including the skills folders and subfolders if present.
-4) Three ideas for a first contribution: Suggest 3 realistic, approachable beginner tasks (such as documentation improvements, proposing a new skill or workflow, adding tests, or refining instructions).
-
-Keep your explanations clear, structured, and welcoming for newcomers."""
-
-    # 3. Call local model via Ollama
-    try:
-        response = ollama.chat(
-            model=model_name,
-            messages=[
-                {
-                    "role": "user",
-                    "content": prompt,
-                }
-            ],
-            options={
-                "num_ctx": 4096,
-            },
-        )
-
-        if hasattr(response, "message") and hasattr(response.message, "content"):
-            guide_content = response.message.content
-        elif isinstance(response, dict) and "message" in response:
-            guide_content = response["message"].get("content", "")
-        else:
-            guide_content = str(response)
-
-    except ollama.ResponseError as e:
-        if e.status_code == 404 or "not found" in str(e).lower():
-            raise RepoGuideError(f"📦 Model '{model_name}' was not found in Ollama. Please run `ollama pull {model_name}` in your terminal to download and install it.")
-        raise RepoGuideError(f"❌ Ollama model error: {e}")
-    except Exception as e:
-        err_msg = str(e)
-        if any(k in err_msg.lower() for k in ["connection", "connect", "refused"]):
-            raise RepoGuideError("🔌 Ollama is not running. Please make sure the Ollama application is running on your machine (`ollama serve`).")
-        elif "not found" in err_msg.lower():
-            raise RepoGuideError(f"📦 Model '{model_name}' was not found in Ollama. Run: `ollama pull {model_name}`")
-        raise RepoGuideError(f"❌ Failed to run {model_name} via Ollama: {err_msg}")
-
-    return {
-        "files_list": files_list,
-        "skill_subfolders": skill_subfolders,
-        "truncated_readme": truncated_readme,
-        "guide_content": guide_content,
-    }
-
-
-@st.cache_data(ttl=3600)
-def fetch_trending_repos(target_date: str):
-    """
-    Fetches trending GitHub repositories created in the past 30 days.
-    Cached for 1 hour with st.cache_data(ttl=3600).
-    """
-    headers = {
-        "User-Agent": "RepoGuide-StreamlitApp",
-        "Accept": "application/vnd.github.v3+json",
-    }
-    url = f"https://api.github.com/search/repositories?q=created:>{target_date}&sort=stars&order=desc&per_page=6"
-    try:
-        res = requests.get(url, headers=headers, timeout=12)
-    except requests.exceptions.Timeout:
-        raise RepoGuideError("⏱️ GitHub trending search request timed out. Please check your internet connection.")
-    except requests.exceptions.RequestException as e:
-        raise RepoGuideError(f"🌐 Network error querying trending repositories: {e}")
-
-    if res.status_code in (403, 429):
-        raise RepoGuideError("⏱️ GitHub API rate limit reached for search queries. Please try again later.")
-    elif res.status_code != 200:
-        raise RepoGuideError(f"⚠️ GitHub search returned unexpected status code {res.status_code}.")
-
-    data = res.json()
-    items = data.get("items", [])
-    results = []
-    for item in items:
-        results.append({
-            "full_name": item.get("full_name", ""),
-            "html_url": item.get("html_url", ""),
-            "stars": item.get("stargazers_count", 0),
-            "description": item.get("description") or "No description provided.",
-        })
-    return results
 
 
 # -----------------------------------------------------------------------------
@@ -733,15 +504,23 @@ if "trigger_run" not in st.session_state:
 if "show_trending" not in st.session_state:
     st.session_state.show_trending = False
 
+if "refresh_nonce" not in st.session_state:
+    st.session_state.refresh_nonce = 0
 
-def select_and_run_repo(target_url: str):
+
+def select_and_run_repo(target_url: str) -> None:
     """Callback to reliably set the URL in session state and trigger analysis."""
     st.session_state.repo_input_url = target_url
     st.session_state.trigger_run = True
 
 
-def toggle_trending():
+def toggle_trending() -> None:
     st.session_state.show_trending = True
+
+
+def trigger_cache_refresh() -> None:
+    st.session_state.refresh_nonce += 1
+    st.session_state.trigger_run = True
 
 
 # -----------------------------------------------------------------------------
@@ -751,14 +530,16 @@ repo_url = st.text_input(
     "GitHub Repository URL",
     key="repo_input_url",
     placeholder="https://github.com/owner/repository",
-    help="Paste the URL of any public GitHub repository",
+    help="Paste the URL of any public GitHub repository (e.g., https://github.com/mattpocock/skills)",
 )
 
-col_act1, col_act2 = st.columns([2, 1])
+col_act1, col_act2, col_act3 = st.columns([2, 1, 1])
 with col_act1:
     analyze_clicked = st.button("Generate Beginner Guide →", type="primary", use_container_width=True)
 with col_act2:
     st.button("Try the example repo", on_click=select_and_run_repo, args=(DEFAULT_REPO_URL,), use_container_width=True)
+with col_act3:
+    st.button("🔄 Refresh Data", on_click=trigger_cache_refresh, use_container_width=True, help="Bypasses cache and fetches fresh data from GitHub and Ollama")
 
 
 # -----------------------------------------------------------------------------
@@ -794,9 +575,9 @@ with col_trend_btn:
 
 if st.session_state.show_trending:
     st.markdown("#### 🔥 Trending New Repositories (Past 30 Days)")
-    date_30_days_ago = (date.today() - timedelta(days=30)).strftime("%Y-%m-%d")
+    date_30_days_ago = (datetime.date.today() - datetime.timedelta(days=30)).strftime("%Y-%m-%d")
     try:
-        trending_list = fetch_trending_repos(date_30_days_ago)
+        trending_list = fetch_trending_repos_cached(date_30_days_ago, token_present, st.session_state.refresh_nonce)
         if not trending_list:
             st.info("No repositories found for this period.")
         else:
@@ -825,7 +606,6 @@ st.markdown('</div>', unsafe_allow_html=True)
 # -----------------------------------------------------------------------------
 should_run = analyze_clicked or st.session_state.trigger_run
 if should_run:
-    # Reset trigger flag
     st.session_state.trigger_run = False
 
     target_url = st.session_state.repo_input_url.strip()
@@ -834,45 +614,85 @@ if should_run:
     else:
         owner, repo = parse_github_url(target_url)
         if not owner or not repo:
-            st.error("⚠️ Invalid GitHub URL. Please enter a valid public repository URL (e.g., https://github.com/mattpocock/skills).")
+            st.error(
+                "⚠️ **Invalid GitHub URL.** Please enter a valid repository URL.\n\n"
+                "- Expected format: `https://github.com/owner/repository`\n"
+                "- Note: Subpaths like `/issues/1` or `/blob/main/...` are not supported."
+            )
         else:
             try:
-                # Spinner uses selected model dynamically
-                with st.spinner(f"Running {selected_model} locally..."):
-                    result = analyze_repo_cached(owner, repo, selected_model)
+                with st.spinner(f"Fetching repository and analyzing with {selected_model} locally..."):
+                    digest = f"{owner}/{repo}"
+                    result = generate_guide_cached(
+                        owner,
+                        repo,
+                        selected_model,
+                        digest,
+                        st.session_state.refresh_nonce,
+                    )
+
+                data: RepoData = result["data"]
+                guide_content: str = result["guide_content"]
 
                 st.success(f"Guide successfully generated for **{owner}/{repo}** using **{selected_model}**!")
 
-                files_list = result["files_list"]
-                skill_subfolders = result["skill_subfolders"]
-                truncated_readme = result["truncated_readme"]
-                guide_content = result["guide_content"]
+                # Visible Indication for Partial Results
+                if data.warnings:
+                    st.warning(
+                        "⚠️ **Partial Results Notice:** Some optional repository data could not be fully loaded:\n"
+                        + "\n".join([f"- {w}" for w in data.warnings])
+                    )
 
-                # Repository Summary Box
-                skills_badge = f"<br/><strong>Skills subfolders found:</strong> {len(skill_subfolders)}" if skill_subfolders else ""
+                # Repository Summary Box (HTML-escaped)
+                safe_owner = html.escape(owner)
+                safe_repo = html.escape(repo)
+                safe_model = html.escape(selected_model)
+
+                skills_badge = f"<br/><strong>Skills subfolders detected:</strong> {len(data.skill_subfolders)}" if data.skill_subfolders else ""
+                dirs_badge = f"<br/><strong>Key directories:</strong> {html.escape(', '.join(data.detected_dirs))}" if data.detected_dirs else ""
+                manifests_badge = f"<br/><strong>Detected manifests:</strong> {html.escape(', '.join(data.detected_manifests))}" if data.detected_manifests else ""
+
                 st.markdown(
                     f"""
                     <div class="repo-summary-box">
-                        <strong>Repository:</strong> <a href="https://github.com/{owner}/{repo}" target="_blank">{owner}/{repo}</a><br/>
-                        <strong>Model used:</strong> {selected_model}<br/>
-                        <strong>Top-level entries:</strong> {len(files_list)} items found{skills_badge}<br/>
-                        <strong>README content:</strong> {len(truncated_readme)} characters analyzed (truncated to first 3,000)
+                        <strong>Repository:</strong> <a href="https://github.com/{safe_owner}/{safe_repo}" target="_blank">{safe_owner}/{safe_repo}</a><br/>
+                        <strong>Model used:</strong> {safe_model}<br/>
+                        <strong>Total tree entries:</strong> {data.total_entries} items mapped{skills_badge}{dirs_badge}{manifests_badge}
                     </div>
                     """,
                     unsafe_allow_html=True,
                 )
 
-                # Expandable details for fetched contents & README
-                with st.expander("🔍 View Raw Fetched Structure & Truncated README"):
-                    st.subheader("Top-Level Files and Directories")
-                    st.code("\n".join(files_list), language="text")
+                # Expandable details for fetched contents, manifests & tree
+                with st.expander("🔍 View Inspected Structure, Manifests & Omissions"):
+                    if data.omissions:
+                        st.subheader("Collection Limits & Omissions")
+                        for o in data.omissions:
+                            st.info(f"ℹ️ {o}")
 
-                    if skill_subfolders:
-                        st.subheader(f"Skills Subfolders ({len(skill_subfolders)} detected)")
-                        st.code("\n".join(skill_subfolders), language="text")
+                    if data.warnings:
+                        st.subheader("Non-Fatal Warnings")
+                        for w in data.warnings:
+                            st.warning(f"⚠️ {w}")
+
+                    st.subheader("Top-Level Files & Directories")
+                    st.code("\n".join(data.files_list), language="text")
+
+                    if data.manifest_snippets:
+                        st.subheader("Analyzed Manifest Snippets")
+                        for path, snip in data.manifest_snippets.items():
+                            st.write(f"**{path}**")
+                            st.code(snip, language="text")
+
+                    if data.skill_subfolders:
+                        st.subheader(f"Skills Subfolders ({len(data.skill_subfolders)} mapped)")
+                        st.code("\n".join(data.skill_subfolders), language="text")
+
+                    st.subheader("Bounded Tree Preview (Depth <= 3)")
+                    st.code("\n".join(data.tree_preview), language="text")
 
                     st.subheader("Truncated README (First 3000 chars)")
-                    st.code(truncated_readme, language="markdown")
+                    st.code(data.truncated_readme, language="markdown")
 
                 # Beginner Guide Output inside Light Theme Card
                 st.markdown('<div class="guide-card">', unsafe_allow_html=True)
@@ -881,14 +701,16 @@ if should_run:
                 st.markdown('</div>', unsafe_allow_html=True)
 
                 # Download Helper
+                safe_file_model = selected_model.replace(":", "_").replace("/", "_")
                 st.download_button(
                     label="📥 Download Guide as Markdown",
                     data=guide_content,
-                    file_name=f"{repo}_{selected_model.replace(':', '_')}_guide.md",
+                    file_name=f"{repo}_{safe_file_model}_guide.md",
                     mime="text/markdown",
                 )
 
             except RepoGuideError as e:
                 st.error(str(e))
             except Exception as e:
-                st.error(f"❌ An unexpected error occurred: {e}")
+                # Sanitized error display to prevent internal leaks
+                st.error(f"❌ An error occurred while generating the guide. Please verify your inputs and local services: {type(e).__name__}")

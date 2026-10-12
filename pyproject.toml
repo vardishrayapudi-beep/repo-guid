@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "repo-guide"
+version = "2.0.0"
+description = "Friendly open-source onboarding guide generator using GitHub API and local Ollama models."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "vardish" }
+]
+dependencies = [
+    "streamlit>=1.35.0,<2.0.0",
+    "requests>=2.31.0,<3.0.0",
+    "ollama>=0.2.0,<1.0.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0.0,<10.0.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
