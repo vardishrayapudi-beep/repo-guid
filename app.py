@@ -15,70 +15,353 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Custom styles for clean, modern aesthetics
-st.markdown(
+
+def apply_theme():
     """
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+    Applies a clean 'light grid' developer-event landing page theme:
+    - #fafafa page background
+    - Dual-layer faint background grids with edge fade masks
+    - Monospace typography (JetBrains Mono)
+    - High contrast text (#16181d, #3b4252) and signature blue (#0069ff) accents
+    """
+    st.markdown(
+        """
+        <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap');
 
-    html, body, [class*="css"] {
-        font-family: 'Plus Jakarta Sans', sans-serif;
-    }
+        /* Global Font Enforcement */
+        html, body, [class*="css"], .stMarkdown, p, span, div, input, button, select, textarea, label {
+            font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace !important;
+        }
 
-    .main-header {
-        text-align: center;
-        padding-top: 0.5rem;
-        padding-bottom: 0.5rem;
-    }
+        /* Base App Background */
+        .stApp {
+            background-color: #fafafa !important;
+            color: #16181d !important;
+            min-height: 100vh;
+        }
 
-    .main-title {
-        font-size: 2.3rem;
-        font-weight: 700;
-        background: linear-gradient(135deg, #2563eb, #7c3aed);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin-bottom: 0.25rem;
-    }
+        /* Position content container over the grid */
+        [data-testid="stAppViewContainer"] > .main {
+            position: relative;
+            z-index: 1;
+        }
 
-    .main-subtitle {
-        color: #64748b;
-        font-size: 1.05rem;
-        margin-bottom: 0.75rem;
-    }
+        /* Fixed Background Grid Containers */
+        .grid-backdrop {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            pointer-events: none;
+            z-index: 0;
+            overflow: hidden;
+        }
 
-    .powered-badge {
-        display: inline-block;
-        background: #f1f5f9;
-        color: #334155;
-        border: 1px solid #cbd5e1;
-        padding: 0.35rem 0.85rem;
-        border-radius: 9999px;
-        font-size: 0.85rem;
-        font-weight: 600;
-        letter-spacing: 0.02em;
-        margin-bottom: 1.25rem;
-    }
+        /* Faint Base Grid across page (rgba(120, 140, 180, 0.12), ~28px spacing) */
+        .grid-layer-main {
+            position: absolute;
+            inset: 0;
+            background-image: 
+                repeating-linear-gradient(to right, rgba(120, 140, 180, 0.12) 0px, rgba(120, 140, 180, 0.12) 1px, transparent 1px, transparent 28px),
+                repeating-linear-gradient(to bottom, rgba(120, 140, 180, 0.12) 0px, rgba(120, 140, 180, 0.12) 1px, transparent 1px, transparent 28px);
+            mask-image: radial-gradient(ellipse at 50% 45%, rgba(0, 0, 0, 1) 35%, rgba(0, 0, 0, 0) 80%);
+            -webkit-mask-image: radial-gradient(ellipse at 50% 45%, rgba(0, 0, 0, 1) 35%, rgba(0, 0, 0, 0) 80%);
+        }
 
-    .repo-summary-box {
-        background: #f8fafc;
-        border-radius: 8px;
-        padding: 0.85rem 1.15rem;
-        border: 1px solid #e2e8f0;
-        margin-bottom: 1.25rem;
-    }
+        /* Accent Grid (soft pink/red rgba(255, 120, 140, 0.14) on right half only) */
+        .grid-layer-pink {
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 50%;
+            height: 100%;
+            background-image: 
+                repeating-linear-gradient(to right, rgba(255, 120, 140, 0.14) 0px, rgba(255, 120, 140, 0.14) 1px, transparent 1px, transparent 28px),
+                repeating-linear-gradient(to bottom, rgba(255, 120, 140, 0.14) 0px, rgba(255, 120, 140, 0.14) 1px, transparent 1px, transparent 28px);
+            mask-image: linear-gradient(to left, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0) 90%),
+                        radial-gradient(ellipse at 70% 40%, rgba(0, 0, 0, 1) 20%, rgba(0, 0, 0, 0) 85%);
+            -webkit-mask-image: linear-gradient(to left, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0) 90%),
+                                radial-gradient(ellipse at 70% 40%, rgba(0, 0, 0, 1) 20%, rgba(0, 0, 0, 0) 85%);
+        }
 
-    .ideas-section {
-        background: #f8fafc;
-        border: 1px solid #e2e8f0;
-        border-radius: 10px;
-        padding: 1rem 1.25rem;
-        margin-top: 1rem;
-        margin-bottom: 1.5rem;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+        /* Typography & Body Text */
+        body, p, li, span {
+            color: #3b4252;
+            line-height: 1.7;
+        }
+
+        h1, h2, h3, h4, h5, h6 {
+            color: #16181d !important;
+            letter-spacing: -0.02em;
+        }
+
+        /* Main Header Layout */
+        .main-header {
+            text-align: center;
+            padding-top: 0.5rem;
+            padding-bottom: 0.5rem;
+            position: relative;
+            z-index: 1;
+        }
+
+        .main-title {
+            font-size: 2.7rem;
+            font-weight: 800;
+            color: #16181d !important;
+            background: none !important;
+            -webkit-text-fill-color: initial !important;
+            margin-bottom: 0.2rem;
+            letter-spacing: -0.03em;
+        }
+
+        .main-subtitle {
+            color: #0069ff !important;
+            font-size: 0.95rem;
+            font-weight: 700;
+            margin-bottom: 0.85rem;
+            letter-spacing: -0.01em;
+        }
+
+        /* Powered Badge: Clean Monospace Pill */
+        .powered-badge {
+            display: inline-block;
+            background: #eef2f7 !important;
+            border: 1px solid #d5dbe6 !important;
+            border-radius: 9999px !important;
+            padding: 0.28rem 0.85rem !important;
+            font-size: 0.72rem !important;
+            font-weight: 600 !important;
+            color: #3b4252 !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.05em !important;
+            margin-bottom: 1.25rem !important;
+            box-shadow: none !important;
+        }
+
+        /* Primary Button: Solid Blue (#0069ff), Square Corners (2px), Bold */
+        div.stButton > button[kind="primary"] {
+            background-color: #0069ff !important;
+            background: #0069ff !important;
+            color: #ffffff !important;
+            border: 1px solid #0069ff !important;
+            border-radius: 2px !important;
+            font-weight: 700 !important;
+            box-shadow: none !important;
+            transition: background-color 0.15s ease, border-color 0.15s ease !important;
+            transform: none !important;
+        }
+
+        div.stButton > button[kind="primary"]:hover {
+            background-color: #0050cc !important;
+            background: #0050cc !important;
+            border-color: #0050cc !important;
+            color: #ffffff !important;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+
+        /* Secondary Buttons: White Background, 1px #d5dbe6 Border, Square-ish Corners */
+        div.stButton > button,
+        div[data-testid="stDownloadButton"] > button {
+            background-color: #ffffff !important;
+            background: #ffffff !important;
+            color: #16181d !important;
+            border: 1px solid #d5dbe6 !important;
+            border-radius: 3px !important;
+            font-weight: 500 !important;
+            box-shadow: none !important;
+            transition: border-color 0.15s ease, color 0.15s ease !important;
+            transform: none !important;
+        }
+
+        div.stButton > button:hover,
+        div[data-testid="stDownloadButton"] > button:hover {
+            border-color: #0069ff !important;
+            color: #0069ff !important;
+            background-color: #ffffff !important;
+            background: #ffffff !important;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+
+        /* Inputs, Selectboxes, Text Areas: 4px Radius, Blue Focus Ring */
+        div[data-testid="stTextInput"] input,
+        div[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
+        div[data-testid="stTextArea"] textarea {
+            background-color: #ffffff !important;
+            background: #ffffff !important;
+            border: 1px solid #d5dbe6 !important;
+            border-radius: 4px !important;
+            color: #16181d !important;
+            box-shadow: none !important;
+            transition: border-color 0.15s ease, box-shadow 0.15s ease !important;
+        }
+
+        div[data-testid="stTextInput"] input:focus,
+        div[data-testid="stSelectbox"] div[data-baseweb="select"] > div:focus-within,
+        div[data-testid="stTextArea"] textarea:focus {
+            border-color: #0069ff !important;
+            box-shadow: 0 0 0 2px rgba(0, 105, 255, 0.20) !important;
+        }
+
+        /* Sidebar: #f4f6fa background with 1px right border #e1e6ef */
+        [data-testid="stSidebar"] {
+            background-color: #f4f6fa !important;
+            background: #f4f6fa !important;
+            border-right: 1px solid #e1e6ef !important;
+            box-shadow: none !important;
+        }
+
+        [data-testid="stSidebar"] * {
+            color: #16181d;
+        }
+
+        [data-testid="stSidebar"] .stMarkdown p,
+        [data-testid="stSidebar"] .stCaption {
+            color: #5c6370 !important;
+        }
+
+        [data-testid="stSidebar"] [data-testid="stAlert"] {
+            background-color: #ffffff !important;
+            border: 1px solid #d5dbe6 !important;
+            border-radius: 4px !important;
+        }
+
+        /* Guide Output Card */
+        .guide-card {
+            background-color: #ffffff !important;
+            background: #ffffff !important;
+            border: 1px solid #e1e6ef !important;
+            border-radius: 8px !important;
+            box-shadow: 0 2px 12px rgba(20, 30, 60, 0.06) !important;
+            padding: 1.75rem !important;
+            margin-top: 1.25rem !important;
+            margin-bottom: 1.5rem !important;
+            color: #16181d !important;
+            line-height: 1.7;
+        }
+
+        /* Section Headings inside Guide: Near-Black with Blue Left Border */
+        .guide-card h1, .guide-card h2, .guide-card h3, .guide-card h4 {
+            color: #16181d !important;
+            border-left: 3px solid #0069ff !important;
+            padding-left: 0.65rem !important;
+            margin-top: 1.35rem !important;
+            margin-bottom: 0.75rem !important;
+            font-weight: 700 !important;
+        }
+
+        /* Summary Box */
+        .repo-summary-box {
+            background-color: #ffffff !important;
+            background: #ffffff !important;
+            border: 1px solid #e1e6ef !important;
+            border-radius: 6px !important;
+            box-shadow: 0 2px 8px rgba(20, 30, 60, 0.04) !important;
+            padding: 1rem 1.25rem !important;
+            margin-bottom: 1.25rem !important;
+            color: #16181d !important;
+        }
+
+        .repo-summary-box a {
+            color: #0069ff !important;
+            font-weight: 600;
+            text-decoration: none;
+        }
+
+        .repo-summary-box a:hover {
+            text-decoration: underline;
+        }
+
+        /* Suggestion Section Wrapper */
+        .suggestions-wrapper {
+            background-color: #ffffff !important;
+            background: #ffffff !important;
+            border: 1px solid #e1e6ef !important;
+            border-radius: 6px !important;
+            box-shadow: 0 2px 8px rgba(20, 30, 60, 0.04) !important;
+            padding: 1.25rem 1.4rem !important;
+            margin-top: 1.25rem !important;
+            margin-bottom: 1.5rem !important;
+        }
+
+        /* Expanders & Alerts matching Light Style */
+        div[data-testid="stExpander"] {
+            background-color: #ffffff !important;
+            background: #ffffff !important;
+            border: 1px solid #e1e6ef !important;
+            border-radius: 6px !important;
+            box-shadow: 0 1px 4px rgba(20, 30, 60, 0.04) !important;
+            color: #16181d !important;
+        }
+
+        div[data-testid="stAlert"] {
+            background-color: #f1f4f9 !important;
+            background: #f1f4f9 !important;
+            border: 1px solid #d5dbe6 !important;
+            border-radius: 6px !important;
+            color: #16181d !important;
+        }
+
+        /* Code Blocks */
+        pre, code {
+            background-color: #f1f4f9 !important;
+            background: #f1f4f9 !important;
+            border: 1px solid #e1e6ef !important;
+            border-radius: 4px !important;
+            color: #0069ff !important;
+            font-family: 'JetBrains Mono', monospace !important;
+        }
+
+        pre code {
+            color: #16181d !important;
+        }
+
+        /* Spinner & Captions Contrast */
+        div[data-testid="stSpinner"] > div {
+            color: #16181d !important;
+        }
+
+        .stCaption, caption {
+            color: #5c6370 !important;
+        }
+
+        label, [data-testid="stWidgetLabel"] p {
+            color: #16181d !important;
+            font-weight: 600;
+        }
+
+        /* Responsive on narrow screens */
+        @media (max-width: 768px) {
+            .main-title {
+                font-size: 2rem !important;
+            }
+            .main-subtitle {
+                font-size: 0.85rem !important;
+            }
+            .guide-card {
+                padding: 1.15rem !important;
+            }
+            .suggestions-wrapper {
+                padding: 1rem !important;
+            }
+        }
+        </style>
+
+        <!-- Fixed Light Background Grid Layers -->
+        <div class="grid-backdrop">
+            <div class="grid-layer-main"></div>
+            <div class="grid-layer-pink"></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# Apply the Clean Light Grid Theme
+apply_theme()
 
 
 class RepoGuideError(Exception):
@@ -181,7 +464,7 @@ st.sidebar.caption("💡 Larger models give better answers but run slower on CPU
 st.markdown(
     f"""
     <div class="main-header">
-        <div class="main-title">🧭 Repo Guide</div>
+        <div class="main-title">Repo Guide</div>
         <div class="main-subtitle">A friendly open-source onboarding guide generator for GitHub repositories</div>
         <div class="powered-badge">Powered by {selected_model} (open-weight, running locally via Ollama)</div>
     </div>
@@ -473,7 +756,7 @@ repo_url = st.text_input(
 
 col_act1, col_act2 = st.columns([2, 1])
 with col_act1:
-    analyze_clicked = st.button("Generate Beginner Guide 🚀", type="primary", use_container_width=True)
+    analyze_clicked = st.button("Generate Beginner Guide →", type="primary", use_container_width=True)
 with col_act2:
     st.button("Try the example repo", on_click=select_and_run_repo, args=(DEFAULT_REPO_URL,), use_container_width=True)
 
@@ -481,7 +764,7 @@ with col_act2:
 # -----------------------------------------------------------------------------
 # FEATURE 2: REPO SUGGESTIONS
 # -----------------------------------------------------------------------------
-st.markdown("---")
+st.markdown('<div class="suggestions-wrapper">', unsafe_allow_html=True)
 st.markdown("### 💡 Need ideas? Try these repos")
 
 curated_repos = [
@@ -534,7 +817,7 @@ if st.session_state.show_trending:
     except Exception as e:
         st.warning(f"⚠️ Could not load trending repositories: {e}")
 
-st.markdown("---")
+st.markdown('</div>', unsafe_allow_html=True)
 
 
 # -----------------------------------------------------------------------------
@@ -591,9 +874,11 @@ if should_run:
                     st.subheader("Truncated README (First 3000 chars)")
                     st.code(truncated_readme, language="markdown")
 
-                # Beginner Guide Output
+                # Beginner Guide Output inside Light Theme Card
+                st.markdown('<div class="guide-card">', unsafe_allow_html=True)
                 st.subheader(f"📖 Beginner Guide: {owner}/{repo}")
                 st.markdown(guide_content)
+                st.markdown('</div>', unsafe_allow_html=True)
 
                 # Download Helper
                 st.download_button(

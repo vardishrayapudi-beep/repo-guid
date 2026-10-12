@@ -8,6 +8,8 @@ It fetches public repository structure, subfolders, and README files using the p
 
 ## Key Features
 
+- 💡 **Clean Light Grid Theme**: Features a clean light grid theme inspired by modern developer-event landing pages, with subtle dual-layer grid backgrounds, JetBrains Mono typography, and crisp borders.
+
 ### 💻 Laptop RAM & Model Picker (Feature 1)
 - **RAM Tier Recommendations**:
   - **8 GB**: Small models around 1B–3B parameters (e.g., `llama3.2:1b`, `qwen2.5:1.5b`).
