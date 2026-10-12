@@ -1,4 +1,5 @@
 import re
+from datetime import date, timedelta
 from urllib.parse import urlparse
 import requests
 import streamlit as st
@@ -10,8 +11,8 @@ DEFAULT_REPO_URL = "https://github.com/mattpocock/skills"
 st.set_page_config(
     page_title="Repo Guide",
     page_icon="🧭",
-    layout="centered",
-    initial_sidebar_state="collapsed",
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
 
 # Custom styles for clean, modern aesthetics
@@ -26,12 +27,12 @@ st.markdown(
 
     .main-header {
         text-align: center;
-        padding-top: 1rem;
+        padding-top: 0.5rem;
         padding-bottom: 0.5rem;
     }
 
     .main-title {
-        font-size: 2.4rem;
+        font-size: 2.3rem;
         font-weight: 700;
         background: linear-gradient(135deg, #2563eb, #7c3aed);
         -webkit-background-clip: text;
@@ -52,10 +53,10 @@ st.markdown(
         border: 1px solid #cbd5e1;
         padding: 0.35rem 0.85rem;
         border-radius: 9999px;
-        font-size: 0.82rem;
+        font-size: 0.85rem;
         font-weight: 600;
         letter-spacing: 0.02em;
-        margin-bottom: 1.5rem;
+        margin-bottom: 1.25rem;
     }
 
     .repo-summary-box {
@@ -65,19 +66,16 @@ st.markdown(
         border: 1px solid #e2e8f0;
         margin-bottom: 1.25rem;
     }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
 
-# App Header
-st.markdown(
-    """
-    <div class="main-header">
-        <div class="main-title">🧭 Repo Guide</div>
-        <div class="main-subtitle">A friendly open-source onboarding guide generator for GitHub repositories</div>
-        <div class="powered-badge">Powered by phi4-mini (open-weight, running locally via Ollama)</div>
-    </div>
+    .ideas-section {
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        padding: 1rem 1.25rem;
+        margin-top: 1rem;
+        margin-bottom: 1.5rem;
+    }
+    </style>
     """,
     unsafe_allow_html=True,
 )
@@ -86,6 +84,110 @@ st.markdown(
 class RepoGuideError(Exception):
     """Custom exception for user-friendly error handling."""
     pass
+
+
+def get_installed_ollama_models():
+    """
+    Retrieves installed Ollama models, handling both response formats:
+    - Object with .models attribute (each with .model or .name)
+    - Dict with 'models' key (each with 'model' or 'name')
+    """
+    try:
+        data = ollama.list()
+    except Exception:
+        return []
+
+    raw_models = getattr(data, "models", None)
+    if raw_models is None and isinstance(data, dict):
+        raw_models = data.get("models", [])
+
+    if not raw_models:
+        return []
+
+    model_names = []
+    for m in raw_models:
+        name = None
+        if hasattr(m, "model") and m.model:
+            name = m.model
+        elif hasattr(m, "name") and m.name:
+            name = m.name
+        elif isinstance(m, dict):
+            name = m.get("model") or m.get("name")
+
+        if name and name not in model_names:
+            model_names.append(name)
+
+    return model_names
+
+
+# -----------------------------------------------------------------------------
+# SIDEBAR: FEATURE 1 - Model Picker for Different Laptops
+# -----------------------------------------------------------------------------
+st.sidebar.header("Choose your model")
+
+ram_choice = st.sidebar.selectbox(
+    "Pick your laptop RAM:",
+    options=["8 GB", "16 GB", "32 GB or more"],
+    index=1,
+    help="Select your system RAM to see recommended model parameters",
+)
+
+if ram_choice == "8 GB":
+    st.sidebar.info("💡 **Recommended for 8 GB:** small models, around 1B-3B parameters (e.g., `llama3.2:1b`, `qwen2.5:1.5b`).")
+elif ram_choice == "16 GB":
+    st.sidebar.info("💡 **Recommended for 16 GB:** models around 3B-4B parameters (`phi4-mini` is the default).")
+else:
+    st.sidebar.info("💡 **Recommended for 32 GB or more:** models around 7B-8B parameters (e.g., `llama3:8b`, `mistral:7b`).")
+
+installed_models = get_installed_ollama_models()
+
+if installed_models:
+    # Default to phi4-mini or phi4-mini:latest if installed
+    default_idx = 0
+    for idx, m in enumerate(installed_models):
+        if m == "phi4-mini" or m.startswith("phi4-mini:"):
+            default_idx = idx
+            break
+
+    selected_from_dropdown = st.sidebar.selectbox(
+        "Installed Ollama models",
+        options=installed_models,
+        index=default_idx,
+        help="Choose from models installed locally in Ollama",
+    )
+else:
+    st.sidebar.warning("⚠️ No models installed in Ollama. Run: `ollama pull phi4-mini` in terminal.")
+    selected_from_dropdown = "phi4-mini"
+
+custom_model_input = st.sidebar.text_input(
+    "Use another Ollama model name",
+    placeholder="e.g., mistral, qwen2.5:3b",
+    help="Type any custom model name you have installed in Ollama",
+)
+
+# Final selected model priority: custom input overrides selectbox
+selected_model = custom_model_input.strip() if custom_model_input.strip() else selected_from_dropdown
+
+# Check if model is missing from installed list
+if installed_models and selected_model not in installed_models and not any(m.startswith(f"{selected_model}:") for m in installed_models):
+    st.sidebar.warning(f"⚠️ Model `{selected_model}` is not in your installed list.\nTo install, run:\n`ollama pull {selected_model}`")
+
+st.sidebar.caption("💡 Larger models give better answers but run slower on CPU.")
+
+
+# -----------------------------------------------------------------------------
+# MAIN APP HEADER
+# -----------------------------------------------------------------------------
+st.markdown(
+    f"""
+    <div class="main-header">
+        <div class="main-title">🧭 Repo Guide</div>
+        <div class="main-subtitle">A friendly open-source onboarding guide generator for GitHub repositories</div>
+        <div class="powered-badge">Powered by {selected_model} (open-weight, running locally via Ollama)</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 
 def parse_github_url(url: str):
@@ -118,7 +220,6 @@ def parse_github_url(url: str):
     if repo.endswith(".git"):
         repo = repo[:-4]
 
-    # Validate characters typical for GitHub user and repo names
     if not re.match(r"^[a-zA-Z0-9_\-\.]+$", owner) or not re.match(r"^[a-zA-Z0-9_\-\.]+$", repo):
         return None, None
 
@@ -218,10 +319,10 @@ def fetch_github_repo_data(owner: str, repo: str):
 
 
 @st.cache_data(show_spinner=False)
-def analyze_repo_cached(owner: str, repo: str):
+def analyze_repo_cached(owner: str, repo: str, model_name: str):
     """
-    Cached analysis of a repository using GitHub API and local phi4-mini via Ollama.
-    Cached via st.cache_data so repeated queries for the same repo are instant.
+    Cached analysis of a repository using GitHub API and local Ollama model.
+    Includes model_name in arguments so each model gets its own cached result.
     """
     # 1. Fetch repo data
     files_list, skill_subfolders, truncated_readme = fetch_github_repo_data(owner, repo)
@@ -259,10 +360,10 @@ Please produce a beginner guide with exactly the following four sections:
 
 Keep your explanations clear, structured, and welcoming for newcomers."""
 
-    # 3. Call local phi4-mini via Ollama
+    # 3. Call local model via Ollama
     try:
         response = ollama.chat(
-            model="phi4-mini",
+            model=model_name,
             messages=[
                 {
                     "role": "user",
@@ -283,13 +384,15 @@ Keep your explanations clear, structured, and welcoming for newcomers."""
 
     except ollama.ResponseError as e:
         if e.status_code == 404 or "not found" in str(e).lower():
-            raise RepoGuideError("📦 Model 'phi4-mini' was not found in Ollama. Please run `ollama run phi4-mini` in your terminal to download and install it.")
+            raise RepoGuideError(f"📦 Model '{model_name}' was not found in Ollama. Please run `ollama pull {model_name}` in your terminal to download and install it.")
         raise RepoGuideError(f"❌ Ollama model error: {e}")
     except Exception as e:
         err_msg = str(e)
-        if "connection" in err_msg.lower() or "connect" in err_msg.lower() or "refused" in err_msg.lower():
+        if any(k in err_msg.lower() for k in ["connection", "connect", "refused"]):
             raise RepoGuideError("🔌 Ollama is not running. Please make sure the Ollama application is running on your machine (`ollama serve`).")
-        raise RepoGuideError(f"❌ Failed to run phi4-mini via Ollama: {err_msg}")
+        elif "not found" in err_msg.lower():
+            raise RepoGuideError(f"📦 Model '{model_name}' was not found in Ollama. Run: `ollama pull {model_name}`")
+        raise RepoGuideError(f"❌ Failed to run {model_name} via Ollama: {err_msg}")
 
     return {
         "files_list": files_list,
@@ -299,20 +402,68 @@ Keep your explanations clear, structured, and welcoming for newcomers."""
     }
 
 
-# State management for URL input and trigger
+@st.cache_data(ttl=3600)
+def fetch_trending_repos(target_date: str):
+    """
+    Fetches trending GitHub repositories created in the past 30 days.
+    Cached for 1 hour with st.cache_data(ttl=3600).
+    """
+    headers = {
+        "User-Agent": "RepoGuide-StreamlitApp",
+        "Accept": "application/vnd.github.v3+json",
+    }
+    url = f"https://api.github.com/search/repositories?q=created:>{target_date}&sort=stars&order=desc&per_page=6"
+    try:
+        res = requests.get(url, headers=headers, timeout=12)
+    except requests.exceptions.Timeout:
+        raise RepoGuideError("⏱️ GitHub trending search request timed out. Please check your internet connection.")
+    except requests.exceptions.RequestException as e:
+        raise RepoGuideError(f"🌐 Network error querying trending repositories: {e}")
+
+    if res.status_code in (403, 429):
+        raise RepoGuideError("⏱️ GitHub API rate limit reached for search queries. Please try again later.")
+    elif res.status_code != 200:
+        raise RepoGuideError(f"⚠️ GitHub search returned unexpected status code {res.status_code}.")
+
+    data = res.json()
+    items = data.get("items", [])
+    results = []
+    for item in items:
+        results.append({
+            "full_name": item.get("full_name", ""),
+            "html_url": item.get("html_url", ""),
+            "stars": item.get("stargazers_count", 0),
+            "description": item.get("description") or "No description provided.",
+        })
+    return results
+
+
+# -----------------------------------------------------------------------------
+# STATE MANAGEMENT & CALLBACKS
+# -----------------------------------------------------------------------------
 if "repo_input_url" not in st.session_state:
     st.session_state.repo_input_url = DEFAULT_REPO_URL
 
 if "trigger_run" not in st.session_state:
     st.session_state.trigger_run = False
 
+if "show_trending" not in st.session_state:
+    st.session_state.show_trending = False
 
-def on_try_example_click():
-    st.session_state.repo_input_url = DEFAULT_REPO_URL
+
+def select_and_run_repo(target_url: str):
+    """Callback to reliably set the URL in session state and trigger analysis."""
+    st.session_state.repo_input_url = target_url
     st.session_state.trigger_run = True
 
 
-# URL Input (pre-filled with default value, editable by the user)
+def toggle_trending():
+    st.session_state.show_trending = True
+
+
+# -----------------------------------------------------------------------------
+# MAIN INPUT SECTION
+# -----------------------------------------------------------------------------
 repo_url = st.text_input(
     "GitHub Repository URL",
     key="repo_input_url",
@@ -324,8 +475,71 @@ col_act1, col_act2 = st.columns([2, 1])
 with col_act1:
     analyze_clicked = st.button("Generate Beginner Guide 🚀", type="primary", use_container_width=True)
 with col_act2:
-    st.button("Try the example repo", on_click=on_try_example_click, use_container_width=True)
+    st.button("Try the example repo", on_click=select_and_run_repo, args=(DEFAULT_REPO_URL,), use_container_width=True)
 
+
+# -----------------------------------------------------------------------------
+# FEATURE 2: REPO SUGGESTIONS
+# -----------------------------------------------------------------------------
+st.markdown("---")
+st.markdown("### 💡 Need ideas? Try these repos")
+
+curated_repos = [
+    ("Skills (mattpocock/skills)", "https://github.com/mattpocock/skills"),
+    ("Ollama (ollama/ollama)", "https://github.com/ollama/ollama"),
+    ("Streamlit (streamlit/streamlit)", "https://github.com/streamlit/streamlit"),
+    ("MarkItDown (microsoft/markitdown)", "https://github.com/microsoft/markitdown"),
+    ("llama.cpp (ggml-org/llama.cpp)", "https://github.com/ggml-org/llama.cpp"),
+]
+
+cur_cols = st.columns(len(curated_repos))
+for idx, (label, c_url) in enumerate(curated_repos):
+    with cur_cols[idx]:
+        st.button(
+            label,
+            key=f"curated_{idx}",
+            on_click=select_and_run_repo,
+            args=(c_url,),
+            use_container_width=True,
+        )
+
+# Trending Repositories Section
+st.write("")
+col_trend_btn, _ = st.columns([1, 2])
+with col_trend_btn:
+    st.button("🔥 Find trending new repos", on_click=toggle_trending, use_container_width=True)
+
+if st.session_state.show_trending:
+    st.markdown("#### 🔥 Trending New Repositories (Past 30 Days)")
+    date_30_days_ago = (date.today() - timedelta(days=30)).strftime("%Y-%m-%d")
+    try:
+        trending_list = fetch_trending_repos(date_30_days_ago)
+        if not trending_list:
+            st.info("No repositories found for this period.")
+        else:
+            for t_idx, item in enumerate(trending_list):
+                t_col1, t_col2 = st.columns([1, 2])
+                with t_col1:
+                    st.button(
+                        f"⭐ {item['stars']:,} • {item['full_name']}",
+                        key=f"trending_item_{t_idx}",
+                        on_click=select_and_run_repo,
+                        args=(item["html_url"],),
+                        use_container_width=True,
+                    )
+                with t_col2:
+                    st.caption(item["description"])
+    except RepoGuideError as e:
+        st.warning(str(e))
+    except Exception as e:
+        st.warning(f"⚠️ Could not load trending repositories: {e}")
+
+st.markdown("---")
+
+
+# -----------------------------------------------------------------------------
+# EXECUTION & OUTPUT
+# -----------------------------------------------------------------------------
 should_run = analyze_clicked or st.session_state.trigger_run
 if should_run:
     # Reset trigger flag
@@ -340,11 +554,11 @@ if should_run:
             st.error("⚠️ Invalid GitHub URL. Please enter a valid public repository URL (e.g., https://github.com/mattpocock/skills).")
         else:
             try:
-                # Show spinner while phi4-mini and data pipeline run
-                with st.spinner("Running phi4-mini locally..."):
-                    result = analyze_repo_cached(owner, repo)
+                # Spinner uses selected model dynamically
+                with st.spinner(f"Running {selected_model} locally..."):
+                    result = analyze_repo_cached(owner, repo, selected_model)
 
-                st.success(f"Guide successfully generated for **{owner}/{repo}**!")
+                st.success(f"Guide successfully generated for **{owner}/{repo}** using **{selected_model}**!")
 
                 files_list = result["files_list"]
                 skill_subfolders = result["skill_subfolders"]
@@ -357,6 +571,7 @@ if should_run:
                     f"""
                     <div class="repo-summary-box">
                         <strong>Repository:</strong> <a href="https://github.com/{owner}/{repo}" target="_blank">{owner}/{repo}</a><br/>
+                        <strong>Model used:</strong> {selected_model}<br/>
                         <strong>Top-level entries:</strong> {len(files_list)} items found{skills_badge}<br/>
                         <strong>README content:</strong> {len(truncated_readme)} characters analyzed (truncated to first 3,000)
                     </div>
@@ -384,7 +599,7 @@ if should_run:
                 st.download_button(
                     label="📥 Download Guide as Markdown",
                     data=guide_content,
-                    file_name=f"{repo}_beginner_guide.md",
+                    file_name=f"{repo}_{selected_model.replace(':', '_')}_guide.md",
                     mime="text/markdown",
                 )
 
